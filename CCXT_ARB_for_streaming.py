@@ -1,0 +1,190 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Jul 22 19:53:25 2020
+
+@author: Ale10
+"""
+import ccxt
+import time
+import threading
+import concurrent.futures
+import pandas as pd
+import winsound
+
+#buscamos las exchanges soportadas por CCXT
+exchanges = ccxt.exchanges
+
+#creamos variable global General, que almacenará las monedas de cada exchange
+global general
+general ={}
+
+
+
+#probando multithreading parte 2. Creamos un loop por todas las exchanges y lanzamos un thread por cada exchange y devuelve las monedas a la variable general
+
+def scanExchanges2(exch): #recibe de a uno las exchnges no en lista. filtra las bolsas que tienen mas de 100 monedas.
+    global general
+    exchange = getattr(ccxt, exch)({'enableRateLimit':True,})
+    try:
+        markets = exchange.load_markets()
+        if len(markets) > 10:
+            general[exch]=markets.keys()
+            print(f'Exchange : {exchange} - Size {len(markets)}')
+    except Exception as e:
+        print(f'Error in the function ScanExchanges2: {e}')
+
+
+
+#probando con concurrents - es el mas veloz
+def multiScan3(exch):
+    start = time.perf_counter()  
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        results = executor.map(scanExchanges2, exch)
+  
+    finish = time.perf_counter()
+    print('time {}'.format(finish-start))
+
+multiScan3(exchanges)
+#symbols = general['yobit']
+
+proxies = {'proxies': {
+        'http': 'http://us-wa.proxymesh.com:31280',  # these proxies won't work for you, they are here for example
+        'https': 'https://us-wa.proxymesh.com:31280',
+    }}
+
+
+#funcion para buscar el order book
+def get_bid_ask(exchange,pair):
+    exchange = getattr(ccxt, exchange)()
+    #time.sleep(exchange.rateLimit / 1000)
+    book = exchange.fetchOrderBook(pair,5)
+    #timestamp = time.ctime()
+    bid = book['bids'][0] # si quiero el precio pnderado tengo que poner [0:3]
+    ask = book['asks'][0]
+    print(exchange," ", bid,ask)
+    return bid,ask
+
+winners = open('winners.csv','a')
+
+#chequea arbitraje entre las tres monedas en el exchange
+def checkarb(exc, moneda1, moneda2, moneda3):
+    print(f'\n \n ----------------------CRYPTO LEG : {moneda1}, {moneda2} ,{moneda3}')
+    ask1,vol1 = get_bid_ask(exc,moneda2+'/'+moneda1)[1]
+    print(f'sell  {moneda1} buy {moneda2} at price {ask1} --  vol {vol1}')
+    resultado1 = 100/ask1
+    print(f'{resultado1}')
+    bid2,vol2 = get_bid_ask(exc, moneda2+'/'+moneda3)[0]
+    print(f'sell {moneda2} buy {moneda3} at price {bid2} -- vol {vol2}')
+    resultado2 = resultado1 * bid2
+    print(f'{resultado2}')
+    bid3,vol3 = get_bid_ask(exc, moneda3+'/'+moneda1)[0]
+    print(f'sell {moneda3} buy {moneda1} at price {bid3} -- vol {vol3}')
+    resultado3 = resultado2*bid3
+    print(f' final result : ----------------------------------------  {resultado3}')
+    if resultado3 > 100.50:
+        winsound.Beep(2342,1000)
+    return time.ctime(), exc, moneda1, moneda2, moneda3, ask1,resultado1, vol1, bid2, resultado2, vol2, bid3, resultado3, vol3
+
+
+def ppp(bidask):
+    df = pd.DataFrame()
+    df['bidPrice'] = [x[0] for x in bidask[0]]
+    df['bidQty']=[x[1] for x in bidask[0]]
+    df['bidpart'] = df.bidQty / df.bidQty.sum()
+    df['ppA'] = df.bidPrice * df.bidpart
+    pppA = df.ppA.sum()
+    df['askPrice'] = [x[0] for x in bidask[1]]
+    df['askQty']=[x[1] for x in bidask[1]]
+    df['askpart'] = df.askQty / df.askQty.sum()
+    df['ppB'] = df.askPrice * df.askpart
+    pppB = df.ppB.sum()
+    return pppB,df.bidQty.sum(),pppA, df.askQty.sum()
+
+filename = 'resultadosArbLTCETH.csv'
+resultados = open(filename,'a')
+
+def buscaOportunidades(exchange):
+   #Ejemplo probando con las monedas de probit
+    #resultados = open('resultadosAbitraje.csv','a')
+    Mercado = exchange
+    exchange = general[Mercado]
+  
+    #Definimos moneda incial y final
+    moneda1 = 'USDT'
+    moneda3 = 'BTC'
+    unionEntreMo1yMo3 =[]#monedas en comun entre la uno y la tres
+    currencies2 = [] #listado de monedas que tradean con la moneda 1
+    
+    #seleccionamos las monedas en comun a la primera y tercera
+    for x in exchange:
+        try:
+            if moneda1 in x.split('/')[1]:
+                currencies2.append(x.split('/')[0])
+        except:
+            pass
+    
+    #elimina moneda 1 de la lista si es que esta
+    try:
+        for x in currencies2:
+            if moneda1 == x:
+                currencies2.remove(moneda1)
+    except Exception as e:
+        print (f'error {e} in the function buscarOportunidades')
+    
+    #genera un listado de todas las monedas que vinculan la dos y la tres
+    for x in currencies2:
+        for y in currencies2:
+            if x+'/'+y in exchange:
+                if y ==moneda3:
+                    print (f' {Mercado} FOUND {x} / {y}')
+                    if x != moneda1:
+                            unionEntreMo1yMo3.append(x)    
+    print(f'Union between coin 1 and 3 {unionEntreMo1yMo3}')
+    
+    #cotiza precios de la pierna posible
+    for x in unionEntreMo1yMo3:
+        try:
+            time, exc, moneda1, moneda2, moneda3, ask1,resultado1, vol1, bid2, resultado2, vol2, bid3, resultado3,vol3 = checkarb(Mercado,moneda1, x,moneda3)
+            #yield exc, moneda1, moneda2, moneda3, ask1,resultado1, ask2, resultado2, bid3, resultado3
+            resultados.write(str(time)+','+str(exc)+','+str(moneda1)+','+str(moneda2)+','+str(moneda3)+','+str(ask1)+','+str(vol1)+','+str(bid2)+','+str(vol2)+','+str(bid3)+','+str(vol3)+','+str(resultado3)+'\n')
+            resultados.flush()
+        except Exception as e:
+            #return "none", "none", "none", "none", "none","none", "none", "none", "none", "none"     
+            print ('-'*60 + str(e))
+        
+    #resultados.flush()    
+
+#Funcion original de cotizacion de bid y asks, sin multithread    
+# def mainSinThrad():
+#     inicio = time.time()
+#     get_bid_ask('binance','ETC/BTC')
+#     get_bid_ask('yobit','ETC/BTC')
+#     get_bid_ask('poloniex','ETC/BTC')
+#     get_bid_ask('crex24','ETC/BTC')
+#     final = time.time()
+#     delay = final - inicio
+#     print(delay)
+            
+def leg(exch,par1,par2,par3):
+    exchange = getattr(ccxt, exch)()
+    if exchange.has['fetchTickers']:
+        pierna = exchange.fetchTickers([par1,par2,par3])
+        leg1 = pierna[par1]['bid']
+        leg2 = pierna[par2]['bid']
+        leg3 = pierna[par3]['bid']
+        return(leg1,leg2,leg3)
+    
+def pairFeeTaker(exch, pair):
+    exchange = getattr(ccxt, exch)()
+    exchange.load_markets()
+    fee = exchange.markets[pair]['taker']
+    return fee
+    
+    
+with concurrent.futures.ThreadPoolExecutor() as executor:
+    results = executor.map(buscaOportunidades, general)
+
+resultados.close()
+df = pd.read_csv(filename)
+df.columns=['fecha','exchange','Base','moneda1','moneda2','precioM1','volM1','precioM2','volM2','precioBase','volBase','Resultado']
+df.to_excel('resultadosArb29TCETHPprocesado.xlsx')
