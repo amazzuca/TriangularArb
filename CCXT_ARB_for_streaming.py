@@ -11,10 +11,10 @@ import concurrent.futures
 import pandas as pd
 import winsound
 
-#buscamos las exchanges soportadas por CCXT
+#We search for the exchanges supported by CCXT
 exchanges = ccxt.exchanges
 
-#creamos variable global General, que almacenará las monedas de cada exchange
+#We create a global dict to store the results
 global general
 general ={}
 
@@ -45,12 +45,7 @@ def multiScan3(exch):
     print('time {}'.format(finish-start))
 
 multiScan3(exchanges)
-#symbols = general['yobit']
 
-proxies = {'proxies': {
-        'http': 'http://us-wa.proxymesh.com:31280',  # these proxies won't work for you, they are here for example
-        'https': 'https://us-wa.proxymesh.com:31280',
-    }}
 
 
 #funcion para buscar el order book
@@ -152,19 +147,6 @@ def buscaOportunidades(exchange):
             #return "none", "none", "none", "none", "none","none", "none", "none", "none", "none"     
             print ('-'*60 + str(e))
         
-    #resultados.flush()    
-
-#Funcion original de cotizacion de bid y asks, sin multithread    
-# def mainSinThrad():
-#     inicio = time.time()
-#     get_bid_ask('binance','ETC/BTC')
-#     get_bid_ask('yobit','ETC/BTC')
-#     get_bid_ask('poloniex','ETC/BTC')
-#     get_bid_ask('crex24','ETC/BTC')
-#     final = time.time()
-#     delay = final - inicio
-#     print(delay)
-            
 def leg(exch,par1,par2,par3):
     exchange = getattr(ccxt, exch)()
     if exchange.has['fetchTickers']:
